@@ -1,1 +1,274 @@
-<h1>hello pages</h1>
+<html>
+<head>
+    <style>
+        table {
+            overflow: scroll;
+            /*height: 25%;*/
+        }
+        table, th, td {
+            border: 1px solid black;
+            margin: 10px 0px 10px 0px;
+        }
+        #api-req-div {
+            border: 1px solid black;
+            padding: 10px 10px 10px 10px;
+            margin-bottom: 5px;
+        }
+        .data-div{
+            border: 1px solid black;
+            padding: 5px 0px 5px 0px;
+            height: 50%;
+            width: 25%;
+            display: inline-block;
+            overflow: auto;
+        }
+        #trade-data-div {
+            overflow: scroll;
+        }
+        #linear-reg-div{
+        }
+        button {
+            display: inline-block;
+            margin: 20px 0px 10px 0px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="api-req-div">
+    <label>Limit:</label>
+    <input type="number" id="limit" value="10">
+
+
+
+    <h3>Select Currency:</h3>
+    <input type="radio" id="zec-inr" name="crypto" value="zecinr" checked>
+    <label for="zec-inr">ZEC</label>
+    <input type="radio" id="sol-inr" name="crypto" value="solinr">
+    <label for="sol-inr">SOL</label>
+    <input type="radio" id="btc-inr" name="crypto" value="btcinr">
+    <label for="sol-inr">BTC</label>
+    <input type="radio" id="bnb-inr" name="crypto" value="bnbinr">
+    <label for="sol-inr">BNB</label>
+    <input type="radio" id="xmr-usdt" name="crypto" value="xmrusdt">
+    <label for="sol-inr">XMR-USDT</label>
+    <p id="last-price"></p>
+
+    <div id="control-panel">
+        <button type="button" onclick="getRecentTrades()">Submit</button>
+        <button type="button" onclick="calcRegLine()">Calculate Linear Regression</button>
+    </div>
+</div>
+
+<div id="trade-data-div" class="data-div">
+    <h3 id="trade-data-loader" style="display: none">Loading...</h3>
+    <table id="recent-trade-data"></table>
+</div>
+
+<div id="linear-reg-div" class="data-div">
+    <h4>Linear Reg Equation:</h4>
+    <p id="equation"></p>
+    <label for="slopeA">A=</label>
+    <input type="number" id="slopeA" name="slopeA" disabled/>
+    <br>
+    <label for="yIntercept">B=</label>
+    <input type="number" id="yIntercept" name="yIntercept" disabled/>
+    <br>
+    <label for="predictor-time">Predictor (X):</label>
+    <input type="datetime-local"
+           id="predictor-time"
+           name="predictor-time" required="true" disabled/>
+
+    <label>Next 'N' hrs(in mins):</label>
+    <input type="number" id="nextNhrs" value="30" style="margin-left: 26px">
+    <br>
+    <label>Interval Distrib.(in mins):</label>
+    <input type="number" id="timeInterval" value="15">
+    <br>
+
+    <button type="button" id="evalExpBtn" onclick="predict()" disabled>Calculate</button>
+    <p id="prediction-para"></p>
+    <canvas id="indicator" width="30" height="30" style="border:1px solid #c3c3c3; display: inline-block"/>
+<!--    <table id="prediction-table">-->
+<!--        <tr>-->
+<!--            <th>Prediction of (X)</th>-->
+<!--            <th>Predicted (Y)</th>-->
+<!--        </tr>-->
+<!--    </table>-->
+</div>
+
+<script>
+    var canvas = document.getElementById("indicator");
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#696969";
+    ctx.fillRect(0,0,30,30);
+
+    function getRecentTrades() {
+        document.getElementById("trade-data-loader").style.display = 'block';
+        document.getElementById("recent-trade-data").innerHTML = "";
+        var cryptoCurrencies = document.getElementsByName("crypto");
+        var params = "limit=" + document.getElementById("limit").value + "&";
+        for (i = 0; i < cryptoCurrencies.length; i++) {
+            if (cryptoCurrencies[i].checked) {
+                params = params.concat("symbol=" + cryptoCurrencies[i].value);
+                console.log(params);
+                break;
+            }
+        }
+        var recentTradeAPIUrl = "https://api.wazirx.com/sapi/v1/trades?" + params;
+        var xmlHttpRequest = new XMLHttpRequest();
+        xmlHttpRequest.open("GET", recentTradeAPIUrl, false);
+        xmlHttpRequest.setRequestHeader("Content-type", "application/json");
+        xmlHttpRequest.onreadystatechange = function () {
+            if (xmlHttpRequest.readyState == 4 &&
+                xmlHttpRequest.status == "200") {
+                //console.table(xmlHttpRequest.responseText);
+                populateTradeData(xmlHttpRequest.responseText);
+            } else {
+                console.error(xmlHttpRequest.responseText);
+            }
+            document.getElementById("trade-data-loader").style.display = 'none';
+        };
+        xmlHttpRequest.send(null);
+    }
+
+    function populateTradeData(response) {
+        var lastPrice = document.getElementById("last-price");
+        var jsonResp = JSON.parse(response);
+        var k = 0;
+        var n= jsonResp.length;
+        if (jsonResp.length > 0) {
+            lastPrice.innerHTML = "Last Price was Rs.<b>" + jsonResp[0].price + "</b> @ "
+                + jsonResp[0].time+" ~ "+new Date(jsonResp[0].time).toLocaleString();
+            k=jsonResp[jsonResp.length-1].time/1000;
+        }
+        var tradeTable = document.getElementById("recent-trade-data");
+        var headerRow = tradeTable.insertRow(0);
+        headerRow.insertCell(0).innerHTML = "DATE-TIME";
+        headerRow.insertCell(1).innerHTML = "TIME (X)";
+        headerRow.insertCell(2).innerHTML = "PRICE (Y)";
+        headerRow.insertCell(3).innerHTML = "MIN (X)";
+
+
+        for (let i = 0; i < jsonResp.length; i++) {
+            var row = tradeTable.insertRow(1);
+            var istTimeCell = row.insertCell(0);
+            var timeCell = row.insertCell(1);
+            var priceCell = row.insertCell(2);
+            var minTimeCell = row.insertCell(3);
+
+            istTimeCell.innerHTML = new Date(jsonResp[i].time).toLocaleString();
+            timeCell.innerHTML = (jsonResp[i].time)/1000;
+            priceCell.innerHTML = jsonResp[i].price;
+            minTimeCell.innerHTML = (jsonResp[i].time)/1000 - k;
+        }
+    }
+
+    function summation(n,x){
+        var sum=0.0;
+        for(i=0;i<n;i++){
+            sum+=parseFloat(x[i]);
+        }
+        return sum;
+    }
+
+    function product(x1,x2){
+        return parseFloat(x1)*parseFloat(x2);
+    }
+
+    function calcRegLine(){
+        document.getElementById("predictor-time").innerHTML="";
+        var tradeTable = document.getElementById("recent-trade-data");
+        var x=new Array();
+        var y=new Array();
+        var xy= new Array();
+        var xsquare = new Array();
+        if(tradeTable.rows.length>1){
+            for(let i=1;i<tradeTable.rows.length;i++){
+                var yValue= tradeTable.rows[i].cells[2].innerHTML;
+                var xValue= tradeTable.rows[i].cells[3].innerHTML;
+                y.push(yValue);
+                x.push(xValue);
+                xy.push(
+                    product(xValue,yValue)
+                );
+                xsquare.push(Math.pow(xValue,2));
+            }
+            var n = tradeTable.rows.length-1;
+            var sumX = summation(x.length,x);
+            var sumY = summation(y.length,y);
+            var sumXY = summation(xy.length,xy);
+            var sumXSQ = summation(xsquare.length,xsquare);
+            var slopeA = [(n*sumXY)-(sumX*sumY)]/[(n*sumXSQ)-Math.pow(sumX,2)];
+            var b= [1/n]*[sumY-slopeA*sumX];
+
+            console.log(n);
+            console.log(sumX);
+            console.log(sumY);
+            console.log(sumXY);
+            console.log(sumXSQ);
+            console.log("y="+slopeA.toFixed(6)+"X + "+b.toFixed(6));
+            document.getElementById("equation").innerHTML="y="+slopeA.toFixed(6)+"X + "+b.toFixed(6);
+
+            document.getElementById("predictor-time").disabled=false;
+            document.getElementById("evalExpBtn").disabled=false;
+            document.getElementById("slopeA").value=slopeA;
+            document.getElementById("yIntercept").value=b;
+
+
+        }
+    }
+    // function evalExpression() {
+    //     var nHrs = document.getElementById("nextNhrs").value;
+    //     var distrib=  document.getElementById("timeInterval").value;
+    //
+    //     if(distrib>nHrs){
+    //         alert("Distribution cannot be greater than 'N' hrs.");
+    //         throw "Distribution cannot be greater than 'N' hrs.";
+    //     }
+    //     var k = document.getElementById("recent-trade-data").rows[1].cells[1].innerHTML;
+    //
+    //     var predictionTable = document.getElementById("prediction-table");
+    //  //   var systime = [(new Date().getTime())/1000]-parseFloat(k);
+    //     var systime = new Date().getTime();
+    //     for(i=0;i<Math.round(nHrs/distrib);i++){
+    //         var row = predictionTable.insertRow(1);
+    //         var timeCell = row.insertCell(0);
+    //         var priceCell = row.insertCell(1);
+    //         var futureTime = new Date(systime + (distrib*0+distrib)*60000).getTime()/1000;
+    //         var x = [futureTime]-parseFloat(k);
+    //         timeCell.innerHTML=futureTime+"~"+new Date(futureTime*1000).toLocaleString();
+    //         priceCell.innerHTML= document.getElementById("slopeA").value*x +
+    //             document.getElementById("yIntercept").value;
+    //
+    //     }
+    // }
+
+    function predict() {
+        var date = document.getElementById("predictor-time");
+        var utcTime = new Date(date.valueAsNumber)/1000;
+        var k = document.getElementById("recent-trade-data").rows[1].cells[1].innerHTML;
+        console.log(utcTime);
+        console.log(utcTime-k);
+        var x = utcTime-k;
+        var y= parseFloat(document.getElementById("slopeA").value*x) +
+            parseFloat(document.getElementById("yIntercept").value);
+        document.getElementById("prediction-para").innerHTML="Predicted="+y.toFixed(4);
+        var tradeTable = document.getElementById("recent-trade-data");
+        var lastPrice = tradeTable.rows[tradeTable.rows.length-1].cells[2].innerHTML;
+        if(!isNaN(lastPrice)){
+            lastPrice = parseFloat(lastPrice);
+            var indicator = document.getElementById("indicator");
+            var ctx = indicator.getContext("2d");
+            if(y.toFixed(4)>=lastPrice){
+                ctx.fillStyle = "#008000";
+            }else{
+                ctx.fillStyle = "#FF0000";
+            }
+            ctx.fillRect(0,0,30,30);
+        }
+    }
+
+</script>
+</body>
+</html>
